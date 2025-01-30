@@ -1,0 +1,96 @@
+---
+- name: Configure Oracle Linux Server
+  hosts: my_servers
+  become: yes
+  vars:
+    firewall_ports: [22, 80, 443, 53, 9090]  # You can change these ports anytime
+
+  tasks:
+
+    - name: Disable SELinux
+      ansible.builtin.selinux:
+        state: disabled
+
+    - name: Ensure SELinux is disabled permanently
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: 'SELINUX=disabled'
+
+    - name: Install Firewalld
+      ansible.builtin.dnf:
+        name: firewalld
+        state: present
+
+    - name: Start and Enable Firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: started
+        enabled: yes
+
+    - name: Allow Required Ports in Firewalld
+      ansible.builtin.firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+      loop: "{{ firewall_ports }}"
+      notify: Reload Firewalld
+
+    - name: Install Cockpit
+      ansible.builtin.dnf:
+        name: cockpit
+        state: present
+
+    - name: Start and Enable Cockpit Service
+      ansible.builtin.service:
+        name: cockpit
+        state: started
+        enabled: yes
+
+    - name: Install iperf3
+      ansible.builtin.dnf:
+        name: iperf3
+        state: present
+
+    - name: Install BIND (DNS Server)
+      ansible.builtin.dnf:
+        name: bind
+        state: present
+
+    - name: Configure Basic BIND DNS Server
+      ansible.builtin.copy:
+        dest: /etc/named.conf
+        content: |
+          options {
+            listen-on port 53 { any; };
+            directory "/var/named";
+            allow-query { any; };
+          };
+        owner: root
+        group: named
+        mode: '0644'
+      notify: Restart BIND
+
+    - name: Start and Enable BIND Service
+      ansible.builtin.service:
+        name: named
+        state: started
+        enabled: yes
+
+    - name: Add Daily DNF Update to Crontab
+      ansible.builtin.cron:
+        name: "Daily DNF Update"
+        minute: "0"
+        hour: "4"
+        job: "dnf -y update"
+
+  handlers:
+    - name: Reload Firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: reloaded
+
+    - name: Restart BIND
+      ansible.builtin.service:
+        name: named
+        state: restarted
